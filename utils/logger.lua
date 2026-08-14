@@ -60,13 +60,16 @@ function M.resolveLogCategory(guild, categoryOption)
   local category = guild:createCategory('Bot Logs')
 
   local everyoneOverwrite = category:getPermissionOverwriteFor(guild.defaultRole)
-  everyoneOverwrite:setDeniedPermissions(discordia.enums.permission.viewChannel)
+  -- readMessages, NOT viewChannel -- discordia kept Discord's original
+  -- permission name; viewChannel is a djs rename with no discordia alias.
+  -- Confirmed via SinisterRectus/Discordia libs/enums.lua.
+  everyoneOverwrite:setDeniedPermissions(discordia.enums.permission.readMessages)
 
   local botMember = guild.me
   if botMember then
     local botOverwrite = category:getPermissionOverwriteFor(botMember)
     botOverwrite:setAllowedPermissions(
-      discordia.enums.permission.viewChannel
+      discordia.enums.permission.readMessages
       + discordia.enums.permission.sendMessages
       + discordia.enums.permission.manageChannels
     )
