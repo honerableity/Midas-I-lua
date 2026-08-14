@@ -1,7 +1,3 @@
--- Midas-I data/words.lua
--- Luau port of data/words.js. Safe word pool -- avoid word combos Roblox
--- chat filter tags as inappropriate. Neutral, everyday nouns/adjectives only.
-
 return {
   'apple','river','stone','cloud','maple','ember','coral','delta','fern','grove',
   'harbor','ivory','jasper','kite','lunar','mango','nectar','onyx','pearl','quartz',
