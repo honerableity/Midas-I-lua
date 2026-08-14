@@ -1,26 +1,16 @@
--- Midas-I utils/moderation.lua
--- Luau port of utils/moderation.js
--- DB: Firestore -> Firebase Realtime Database (see utils/rtdb.lua + chat
--- decision log: separate parallel DB, not shared with Node bot).
-
 local rtdb = require('rtdb')
 local discordia = require('discordia')
 local enums = discordia.enums
 
 local M = {}
 
--- ---------- duration parsing ----------
--- Node: parseDuration() -- accepts "10m","2h","3d","1w", "permanent"/"none"/""
--- -> nil (permanent). Returns ms, or nil for permanent.
--- Node distinguishes null (permanent) vs undefined (invalid) as two falsy
--- values -- Lua has only nil, so invalid returns false as a sentinel instead.
 function M.parseDuration(input)
   if not input or input == '' then return nil end
   local s = tostring(input):trim():lower()
   if s == 'permanent' or s == 'perm' or s == 'none' or s == '' then return nil end
 
   local amount, unit = s:match('^(%d+)%s*(%a+)$')
-  if not amount then return false end -- false = invalid (Node's `undefined`)
+  if not amount then return false end 
 
   local validUnits = {
     m = true, min = true, mins = true, minute = true, minutes = true,
@@ -51,10 +41,6 @@ function M.formatDuration(ms)
   return weeks .. 'w'
 end
 
--- ---------- protected target guard ----------
--- Node: isProtectedTarget(guild, member, user) -- member is a fetched
--- GuildMember (nil if target isn't in guild, e.g. unban-by-id), user is
--- base User, fallback for bot check when member is nil.
 function M.isProtectedTarget(guild, member, user)
   local targetUser = (member and member.user) or user
   if targetUser and targetUser.id == guild.ownerId then
@@ -69,9 +55,6 @@ function M.isProtectedTarget(guild, member, user)
   return { blocked = false }
 end
 
--- ---------- mod action DM ----------
--- Node: sendModDM() -- best-effort, never throws, caller doesn't need pcall.
--- No moderator name/tag included by design (privacy).
 function M.sendModDM(user, opts)
   local embed = {
     title = opts.reversal and ('Action reversed: ' .. opts.action) or ('Moderation action: ' .. opts.action),
@@ -85,20 +68,12 @@ function M.sendModDM(user, opts)
     table.insert(embed.fields, { name = 'Duration', value = opts.duration })
   end
 
-  -- User:send() -- confirmed real, shortcut for getPrivateChannel():send()
-  -- (SinisterRectus/Discordia libs/containers/User.lua). Best-effort, never
-  -- throws to caller -- matches Node's .catch(() => {}) behavior.
   pcall(function() user:send({ embed = embed }) end)
 end
 
--- ---------- guild mod config (setwarn thresholds) ----------
--- Node path: guildConfig/{guildId}.warnThresholds (Firestore doc field)
--- RTDB path: guildConfig/{guildId}/warnThresholds
 function M.getWarnThresholds(guildId)
   local data = rtdb.get('guildConfig/' .. guildId .. '/warnThresholds')
   if not data then return {} end
-  -- RTDB returns array-like tables as Lua tables w/ integer keys already
-  -- when source was a JSON array; guard against sparse/dict shape too.
   local list = {}
   for _, v in pairs(data) do table.insert(list, v) end
   return list
@@ -107,7 +82,6 @@ end
 function M.addWarnThreshold(guildId, threshold)
   local existing = M.getWarnThresholds(guildId)
 
-  -- Node: filter out same-count rule, push new one, sort by count.
   local filtered = {}
   for _, t in ipairs(existing) do
     if t.count ~= threshold.count then table.insert(filtered, t) end
@@ -119,11 +93,6 @@ function M.addWarnThreshold(guildId, threshold)
   return filtered
 end
 
--- ---------- warns ----------
--- Node: warns/{guildId}_{userId} doc = { guildId, userId, count, history:[] }
--- RTDB: warns/{guildId}_{userId} node. history is push()'d sub-nodes instead
--- of an array (RTDB has no arrayUnion; array-of-objects is an anti-pattern
--- for RTDB per Firebase's own structuring guidance) -- see chat decision log.
 local function warnPath(guildId, userId)
   return 'warns/' .. guildId .. '_' .. userId
 end
@@ -153,8 +122,6 @@ function M.resetWarns(guildId, userId)
   local path = warnPath(guildId, userId)
   rtdb.set(path, { guildId = guildId, userId = userId, count = 0, history = nil })
 end
-
--- ---------- honeypot config ----------
 function M.setHoneypotChannel(guildId, channelId)
   rtdb.update('guildConfig/' .. guildId, { honeypotChannelId = channelId })
 end
@@ -163,18 +130,12 @@ function M.getHoneypotChannel(guildId)
   return rtdb.get('guildConfig/' .. guildId .. '/honeypotChannelId')
 end
 
--- ---------- expiring actions (temp-ban, vcmute) ----------
--- Node: expiringActions/{autoId} doc, queried with 3x .where() AND filter.
--- RTDB: composite key expiringActions/{guildId}_{userId}_{type} -- O(1)
--- direct get/set/delete, no multi-field query needed for the clear case.
--- Due-scan (single field, expiresAt) still works fine via orderBy on this
--- same flat node regardless of key shape -- see chat decision log.
 local function expiringKey(guildId, userId, type_)
   return guildId .. '_' .. userId .. '_' .. type_
 end
 
 function M.scheduleExpiringAction(guildId, userId, type_, expiresAtMs, moderatorId)
-  if expiresAtMs == nil then return end -- permanent, nothing to schedule
+  if expiresAtMs == nil then return end 
   local key = expiringKey(guildId, userId, type_)
   rtdb.set('expiringActions/' .. key, {
     guildId = guildId,
@@ -186,17 +147,12 @@ function M.scheduleExpiringAction(guildId, userId, type_, expiresAtMs, moderator
   })
 end
 
--- Node: clearExpiringActions() -- removed the manual/re-ban timer for a
--- user+type. Composite key makes this a single direct delete, no scan.
 function M.clearExpiringActions(guildId, userId, type_)
   local key = expiringKey(guildId, userId, type_)
   local ok = pcall(rtdb.delete, 'expiringActions/' .. key)
   return ok
 end
 
--- Node: getDueExpiringActions() -- .where('expiresAt','<=',nowMs)
--- RTDB: orderBy=expiresAt&endAt=nowMs (needs .indexOn:["expiresAt"] rule
--- set on expiringActions in Firebase console -- flagged separately).
 function M.getDueExpiringActions(nowMs)
   local data = rtdb.queryEndAt('expiringActions', 'expiresAt', nowMs)
   local due = {}
@@ -213,8 +169,6 @@ function M.deleteExpiringAction(docId)
   pcall(rtdb.delete, 'expiringActions/' .. docId)
 end
 
--- Scans due expiring actions and reverses them (unban / voice-unmute).
--- Called on boot and on an interval. Self-contained -- only needs the client.
 function M.runExpiryScan(client)
   local ok, due = pcall(M.getDueExpiringActions, os.time() * 1000)
   if not ok then
@@ -231,15 +185,11 @@ function M.runExpiryScan(client)
       end
 
       if action.type == 'ban' then
-        -- Guild:unbanUser(id, reason) -- confirmed real method, Member:unban()
-        -- is a thin delegate to this same call (SinisterRectus/Discordia
-        -- libs/containers/Member.lua). userId string works via Resolver.
+        
         pcall(function() guild:unbanUser(action.userId, 'Temp-ban duration expired') end)
       elseif action.type == 'vcmute' then
         local member = guild:getMember(action.userId)
-        -- Member:mute()/Member:unmute() -- confirmed real methods, no
-        -- boolean-arg setMute() exists in discordia (that's a djs-ism).
-        -- See SinisterRectus/Discordia libs/containers/Member.lua.
+      
         if member and member.voiceChannel then
           pcall(function() member:unmute() end)
         end
@@ -250,15 +200,14 @@ function M.runExpiryScan(client)
 
     if not ok2 then
       print('[moderation] failed to reverse expiring action ' .. tostring(action.id) .. ': ' .. tostring(err2))
-      -- Leave the node in place so it retries next scan pass instead of
-      -- silently dropping a stuck ban/mute.
+     
     end
   end
 end
 
 function M.startExpiryScanner(client, intervalMs)
   intervalMs = intervalMs or 60 * 1000
-  M.runExpiryScan(client) -- run once immediately on boot to catch anything missed while offline
+  M.runExpiryScan(client)
   local timer = require('timer')
   timer.setInterval(intervalMs, function() M.runExpiryScan(client) end)
 end
