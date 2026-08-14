@@ -1,12 +1,3 @@
--- Midas-I commands/mod.lua
--- Luau port of commands/mod.js
--- Slash command builder: discordia-slash tools.* (tools.slashCommand,
--- tools.subCommand, tools.string, etc -- confirmed real via
--- GitSparTV/discordia-slash util/tools.lua)
--- Subcommand args: tools.getSubCommand(cmd) returns (subArgs, subPath) --
--- confirmed real, unwraps the nested parsed_options table for us instead of
--- hand-rolling the subcommand-name + flat-args extraction.
-
 local discordia = require('discordia')
 local tools = require('discordia-slash').util.tools()
 local logger = require('logger')
@@ -15,10 +6,6 @@ local moderation = require('moderation')
 local enums = discordia.enums
 
 local M = {}
-
--- ---------- slash command data (discordia-slash CommandConstructor) ----------
--- Node: SlashCommandBuilder chain. Lua: tools.slashCommand + tools.subCommand
--- + tools.<type>() builders, each returns self for chaining (confirmed).
 
 local ACTION_CHOICES = {
   tools.choice('ban', 'ban'),
@@ -113,31 +100,18 @@ M.logSchema = {
   },
 }
 
--- ---------- top-level execute ----------
--- Node: interaction.deferReply({ ephemeral: true }) then dispatch by
--- interaction.options.getSubcommand(). Lua: ia:replyDeferred(true) is the
--- deferred-reply call (confirmed, boolean param not options table --
--- Bilal2453/discordia-interactions libs/containers/Interaction.lua), then
--- tools.getSubCommand(cmd) gives (subArgs, subName) directly.
 function M.execute(ia, cmd)
   if not ia.guildId then
     ia:reply({ content = 'This command only works inside a server.' }, true)
     return
   end
 
-  -- Node: interaction.memberPermissions?.has(PermissionFlagsBits.ModerateMembers)
-  -- Lua: ia.appPermissions is the BOT's permissions, not the invoking
-  -- member's -- wrong check. Use ia.member:hasPermission() instead (confirmed
-  -- real, SinisterRectus/Discordia libs/containers/Member.lua).
   if not (ia.member and ia.member:hasPermission(enums.permission.moderateMembers)) then
     ia:reply({ content = 'You need Moderate Members permission to do that.' }, true)
     return
   end
 
   local args, sub = tools.getSubCommand(cmd)
-
-  -- Defer immediately -- RTDB reads/writes and Discord member fetches below
-  -- can blow the 3s ack window. Same guard used across every other command.
   ia:replyDeferred(true)
 
   local handlers = {
@@ -167,11 +141,8 @@ function M.execute(ia, cmd)
   end
 end
 
--- ---------- subcommand handlers ----------
-
 function M.handleBan(ia, args)
-  local user = args.user -- resolved Member (in guild) or User (confirmed via
-                          -- discordia-slash Client.lua AugmentResolved/ParseOptions)
+  local user = args.user 
   local durationInput = args.duration
   local reason = args.reason or 'No reason provided'
 
@@ -181,8 +152,6 @@ function M.handleBan(ia, args)
     return
   end
 
-  -- args.user may already be a Member (has .user field) or a bare User --
-  -- normalize both a "member" and "user" reference for the guard/DM/ban calls.
   local member = (args.user.user and args.user) or nil
   local targetUser = (args.user.user and args.user.user) or args.user
 
@@ -192,9 +161,6 @@ function M.handleBan(ia, args)
     return
   end
 
-  -- discordia has no member.bannable shortcut (djs-ism) -- role hierarchy
-  -- check is left to Discord's own 403 response on the banUser call below;
-  -- caught and reported same as any other failure.
   moderation.sendModDM(targetUser, {
     guildName = ia.guild.name,
     action = 'Banned',
@@ -257,9 +223,6 @@ end
 
 function M.handleUnban(ia, args)
   local userId = (args.user or ''):gsub('^%s+', ''):gsub('%s+$', '')
-
-  -- Node: interaction.guild.bans.fetch(userId) -- discordia equiv is
-  -- Guild:getBan(id), confirmed real (SinisterRectus/Discordia wiki/Guild).
   local ban = select(1, pcall(function() return ia.guild:getBan(userId) end)) and ia.guild:getBan(userId) or nil
   if not ban then
     ia:reply({ content = 'That user ID is not banned.' })
@@ -291,7 +254,7 @@ function M.handleMute(ia, args)
   local reason = args.reason or 'No reason provided'
 
   local durationMs = moderation.parseDuration(durationInput)
-  if not durationMs then -- nil (permanent) or false (invalid) both rejected: mute can't be permanent
+  if not durationMs then 
     ia:reply({ content = 'Invalid duration "' .. tostring(durationInput) .. '". Use formats like 10m, 2h, 3d (max 28d). Mute cannot be permanent.' })
     return
   end
@@ -313,9 +276,6 @@ function M.handleMute(ia, args)
     return
   end
 
-  -- Node: member.timeout(ms, reason). Lua: Member:timeoutFor(seconds, ...) --
-  -- confirmed real, takes SECONDS not ms (SinisterRectus/Discordia
-  -- libs/containers/Member.lua timeoutFor/timeoutUntil).
   local ok = pcall(function() member:timeoutFor(math.floor(durationMs / 1000)) end)
   if not ok then
     ia:reply({ content = 'I can\'t timeout ' .. targetUser.username .. ' — check role hierarchy / my permissions.' })
@@ -360,8 +320,6 @@ function M.handleVcMute(ia, args)
     return
   end
 
-  -- Member:mute() -- confirmed real, no boolean/reason args (djs's
-  -- member.voice.setMute(true, reason) has no 1:1 discordia equiv).
   local ok = pcall(function() member:mute() end)
   if not ok then
     ia:reply({ content = 'I can\'t voice-mute ' .. targetUser.username .. ' — check role hierarchy / my permissions.' })
@@ -394,12 +352,12 @@ function M.handleUnmute(ia, args)
   end
   local targetUser = member.user
 
-  if not member.timedOut then -- confirmed real property (SinisterRectus/Discordia Member.lua get.timedOut)
+  if not member.timedOut then 
     ia:reply({ content = targetUser.username .. ' is not currently muted.' })
     return
   end
 
-  local ok = pcall(function() member:removeTimeout() end) -- confirmed real
+  local ok = pcall(function() member:removeTimeout() end) 
   if not ok then
     ia:reply({ content = 'I can\'t unmute ' .. targetUser.username .. ' — check role hierarchy / my permissions.' })
     return
@@ -425,7 +383,7 @@ function M.handleUnvcMute(ia, args)
   end
   local targetUser = member.user
 
-  if not member.muted then -- confirmed real property (SinisterRectus/Discordia Member.lua get.muted)
+  if not member.muted then 
     ia:reply({ content = targetUser.username .. ' is not currently voice-muted.' })
     return
   end
@@ -498,7 +456,7 @@ function M.handleWarn(ia, args)
 end
 
 function M.applyThresholdAction(ia, user, threshold)
-  local member = ia.guild:getMember(user.id) -- may make an HTTP request, confirmed real
+  local member = ia.guild:getMember(user.id)
 
   local guard = moderation.isProtectedTarget(ia.guild, member, user)
   if guard.blocked then
@@ -523,7 +481,7 @@ function M.applyThresholdAction(ia, user, threshold)
   if threshold.action == 'mute' then
     if not member then return 'Reached ' .. threshold.count .. ' warns but user is not in server.' end
     local durationMs = moderation.parseDuration(threshold.duration)
-    if not durationMs or durationMs == false then durationMs = 10 * 60 * 1000 end -- fallback 10m
+    if not durationMs or durationMs == false then durationMs = 10 * 60 * 1000 end 
     local ok = pcall(function() member:timeoutFor(math.floor(durationMs / 1000)) end)
     if not ok then return 'Reached ' .. threshold.count .. ' warns but I can\'t mute (permissions).' end
     moderation.sendModDM(user, { guildName = ia.guild.name, action = 'Muted', reason = 'Reached ' .. threshold.count .. ' warns', duration = moderation.formatDuration(durationMs) })
@@ -533,7 +491,7 @@ function M.applyThresholdAction(ia, user, threshold)
   if threshold.action == 'role' then
     if not member then return 'Reached ' .. threshold.count .. ' warns but user is not in server.' end
     if not threshold.roleId then return 'Reached ' .. threshold.count .. ' warns but no role configured.' end
-    local ok = pcall(function() member:addRole(threshold.roleId) end) -- confirmed real
+    local ok = pcall(function() member:addRole(threshold.roleId) end) 
     if not ok then return 'Reached ' .. threshold.count .. ' warns but I can\'t assign the role (permissions).' end
     return 'Auto-assigned role for reaching ' .. threshold.count .. ' warns.'
   end
@@ -545,7 +503,7 @@ function M.handleSetWarn(ia, args)
   local warncount = args.warncount
   local action = args.action
   local durationInput = args.duration
-  local role = args.role -- resolved Role object (confirmed via ParseOptions roleOptionType)
+  local role = args.role 
 
   if action == 'mute' then
     local durationMs = moderation.parseDuration(durationInput)
@@ -588,11 +546,6 @@ end
 
 function M.handleMemberCount(ia)
   local guild = ia.guild
-  -- Node: guild.memberCount (cached), guild.members.cache filter. discordia:
-  -- guild.totalMemberCount is the Discord-provided total (confirmed real,
-  -- SinisterRectus/Discordia wiki/Guild); guild.members is only the CACHED
-  -- subset, so human/bot split below only covers cached members, not all --
-  -- flagged since discordia doesn't cache all members by default.
   local total = guild.totalMemberCount
   local humans, bots = 0, 0
   for member in guild.members:iter() do
@@ -608,7 +561,7 @@ function M.handleMemberCount(ia)
 end
 
 function M.handleHoneypot(ia, args)
-  local channel = args.channel -- resolved Channel object (confirmed via ParseOptions channelOptionType)
+  local channel = args.channel
 
   moderation.setHoneypotChannel(ia.guildId, channel.id)
 
@@ -619,8 +572,6 @@ function M.handleHoneypot(ia, args)
     fields = { channel = channel.name },
   })
 end
-
--- ---------- honeypot trigger (called from main.lua messageCreate listener) ----------
 
 function M.handleHoneypotMessage(message)
   if not message.guild or message.author.bot then return end
@@ -640,10 +591,6 @@ function M.handleHoneypotMessage(message)
 
   pcall(function() message:delete() end)
 
-  -- Purge all their messages server-wide: scan text channels for recent
-  -- messages from this user and delete. Node's channel.bulkDelete has no
-  -- 1:1 discordia equiv found in the confirmed API surface -- delete
-  -- individually per message instead (slower, same net effect, best-effort).
   for channel in guild.textChannels:iter() do
     local ok, recent = pcall(function() return channel:getMessages(100) end)
     if ok and recent then
@@ -663,10 +610,6 @@ function M.handleHoneypotMessage(message)
   })
 
   local ok = pcall(function() guild:banUser(userId, 'Honeypot channel triggered', 7) end)
-  -- Guild:banUser's 3rd arg is message-purge days (up to 7), NOT ban
-  -- duration -- confirmed via SinisterRectus/Discordia libs/containers/Guild.lua.
-  -- Discord bans are permanent by default; the 7-day auto-unban below is a
-  -- separate scheduled reversal, same as Node's setTimeout-free expiringActions design.
   if not ok then
     print('[mod] honeypot triggered by ' .. message.author.username .. ' but ban failed (permissions).')
     return
@@ -674,8 +617,6 @@ function M.handleHoneypotMessage(message)
 
   moderation.scheduleExpiringAction(guild.id, userId, 'ban', os.time() * 1000 + 7 * 24 * 60 * 60 * 1000, guild.client.user.id)
 
-  -- Node builds a fakeInteraction table to reuse logCommandActivity outside
-  -- a real interaction context -- same shape needed here.
   local fakeInteraction = {
     guildId = guild.id,
     commandName = 'mod',
