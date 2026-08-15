@@ -4,6 +4,20 @@ local fs = require('fs')
 local pathjoin = require('pathjoin')
 local dotenv = require('dotenv')
 
+-- Luvit's require() only resolves bare deps/ modules (like 'coro-http') when
+-- called directly from the entrypoint file. Files under commands/ and utils/
+-- are nested too deep to find deps/ on their own, so we require the modules
+-- utils/rtdb.lua needs here (from main.lua, the entrypoint) and prime
+-- package.loaded so those same require('coro-http') / require('json') calls
+-- inside utils/rtdb.lua resolve from cache instead of failing.
+package.loaded['coro-http'] = require('coro-http')
+package.loaded['json'] = require('json')
+package.loaded['fs'] = fs
+package.loaded['pathjoin'] = pathjoin
+package.loaded['discordia'] = discordia
+package.loaded['discordia-slash'] = dslash
+package.loaded['dotenv'] = dotenv
+
 local ok, err = dotenv.load()
 if not ok then
   print('Failed to load .env: ' .. tostring(err))
