@@ -18,8 +18,19 @@ data:addOption(
 
 M.data = data
 
-local function stickyPath(channelId)
-  return 'sticky/' .. channelId
+local function safeDeleteMessage(channel, messageId)
+  if not messageId then return end
+  local ok, err = pcall(function()
+    local msg = channel.messages:get(messageId)
+    if not msg then
+      msg = channel:getMessage(messageId)
+    end
+    if msg then msg:delete() end
+  end)
+  if not ok then
+    print('[sticky] safeDeleteMessage failed for ' .. tostring(messageId) .. ' in ' .. tostring(channel.id) .. ': ' .. tostring(err))
+  end
+  return ok
 end
 
 local function repostSticky(channel, record)
@@ -63,17 +74,12 @@ function M.handleActivity(message)
   if not record or not record.stickyMessageId then return end
   if message.id == record.stickyMessageId then return end
 
-  local getOk, oldMsg = pcall(function() return channel:getMessage(record.stickyMessageId) end)
-  if getOk and oldMsg then
-    local delOk, delErr = pcall(function() oldMsg:delete() end)
-    if not delOk then
-      print('[sticky] failed to delete old sticky in ' .. tostring(channel.id) .. ': ' .. tostring(delErr))
-    end
-  elseif not getOk then
-    print('[sticky] getMessage(old sticky) failed in ' .. tostring(channel.id) .. ': ' .. tostring(oldMsg))
-  end
+  safeDeleteMessage(channel, record.stickyMessageId)
 
-  repostSticky(channel, record)
+  local repostOk, repostErr = pcall(repostSticky, channel, record)
+  if not repostOk then
+    print('[sticky] repostSticky threw in ' .. tostring(channel.id) .. ': ' .. tostring(repostErr))
+  end
 end
 
 function M.execute(ia, cmd, args)
@@ -114,10 +120,7 @@ function M.execute(ia, cmd, args)
     -- Remove any existing sticky in this channel first (one per channel).
     local existing = rtdb.get(stickyPath(channel.id))
     if existing and existing.stickyMessageId then
-      local oldOk, oldMsg = pcall(function() return channel:getMessage(existing.stickyMessageId) end)
-      if oldOk and oldMsg then
-        pcall(function() oldMsg:delete() end)
-      end
+      safeDeleteMessage(channel, existing.stickyMessageId)
     end
 
     local newMsg = repostSticky(channel, {
@@ -142,10 +145,7 @@ function M.execute(ia, cmd, args)
       return
     end
 
-    local getOk, msg = pcall(function() return channel:getMessage(existing.stickyMessageId) end)
-    if getOk and msg then
-      pcall(function() msg:delete() end)
-    end
+    safeDeleteMessage(channel, existing.stickyMessageId)
 
     rtdb.delete(stickyPath(channel.id))
 
