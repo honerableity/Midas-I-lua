@@ -1,7 +1,7 @@
 local discordia = require('discordia')
 local tools = require('discordia-slash').util.tools()
-local logger = require('logger')
-local verification = require('verification')
+local logger = require('utils.logger')
+local verification = require('utils.verification')
 
 local enums = discordia.enums
 
