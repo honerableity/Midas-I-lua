@@ -1,6 +1,5 @@
 local discordia = require('discordia')
 local tools = require('discordia-slash').util.tools()
-local childprocess = require('childprocess')
 local pathjoin = require('pathjoin')
 
 local M = {}
@@ -8,12 +7,12 @@ local M = {}
 local data = tools.slashCommand('redeploy', 'Pull latest code from GitHub and restart the bot')
 M.data = data
 
--- Spawns a fresh start.sh (which does the git pull + self-copy guard
--- itself) as a detached process, then kills this one. Detached so the
--- child survives past this process's exit instead of dying with it --
--- same reasoning as start.sh's own self-copy guard, just one level up.
--- stdio inherits the current terminal so the new run's output still
--- shows in the wispbyte console instead of going to a silent orphan.
+-- childprocess isn't available in this Luvit build, so we shell out with
+-- plain os.execute instead. `nohup ... & disown` backgrounds start.sh and
+-- detaches it from this process's session so it survives past this
+-- process's exit (same goal as start.sh's own self-copy guard, one level
+-- up). Output goes to redeploy.log next to start.sh since nohup can't
+-- inherit this process's stdio the way a real spawn could.
 function M.execute(ia, cmd, args)
   if not ia.guildId then
     ia:reply({ content = 'This command only works inside a server.' }, true)
@@ -27,24 +26,22 @@ function M.execute(ia, cmd, args)
 
   ia:reply({ content = 'Pulling latest code and restarting...' }, true)
 
-  local startScript = pathjoin.pathJoin(module.dir, '..', 'start.sh')
+  local repoRoot = pathjoin.pathJoin(module.dir, '..')
+  local cmdStr = string.format(
+    'cd %q && nohup bash start.sh >> redeploy.log 2>&1 & disown',
+    repoRoot
+  )
 
-  local ok, err = pcall(function()
-    local child = childprocess.spawn('bash', { startScript }, {
-      detached = true,
-      stdio = { 0, 1, 2 },
-    })
-    child:unref()
-  end)
-
+  local ok = os.execute(cmdStr)
   if not ok then
-    print('redeploy: failed to spawn start.sh: ' .. tostring(err))
-    ia:editReply({ content = 'Failed to spawn start.sh, check console: ' .. tostring(err) })
+    print('redeploy: failed to spawn start.sh')
+    ia:editReply({ content = 'Failed to spawn start.sh, check console.' })
     return
   end
 
-  -- Give the spawn call a moment to actually land before this process
-  -- dies -- exiting in the same tick risks the child never launching.
+  -- Give the shell a moment to actually launch the child before this
+  -- process dies -- exiting in the same tick risks the child never
+  -- getting off the ground.
   discordia.timer.setTimeout(1000, function()
     os.exit(0)
   end)
