@@ -18,6 +18,10 @@ data:addOption(
 
 M.data = data
 
+local function stickyPath(channelId)
+  return 'sticky/' .. channelId
+end
+
 local function safeDeleteMessage(channel, messageId)
   if not messageId then return end
   local ok, err = pcall(function()
