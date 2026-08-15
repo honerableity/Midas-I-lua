@@ -110,17 +110,9 @@ end
 if not (ia.data and ia.data.custom_id and ia.data.custom_id:match('^ticket_')) then return end
 
 local ticketCommand = client.commands['ticket']
-if not (ticketCommand and ticketCommand.handleComponent) then return end
-
-local ok, err = pcall(ticketCommand.handleComponent, ia)
-if not ok then
-  print('Error in ticket component handler: ' .. tostring(err))
-  replyBotError(ia)
-end
-end
 
 local function routeVerifyComponent(ia)
-  if not (ia.data and ia.data.custom_id) then return end
+  if not (ia.data and ia.data.custom_id and ia.data.custom_id:match('^ticket_')) then return end
   local id = ia.data.custom_id
   if not (id == 'verify_button' or id == 'verify_modal' or id == 'unverify_modal' or id:match('^profile_')) then return end
 
