@@ -2,11 +2,16 @@ local http = require('coro-http')
 local json = require('json')
 local fs = require('fs')
 local pathjoin = require('pathjoin')
+local dotenv = require('dotenv')
 
 local M = {}
 
-local RTDB_URL = os.getenv('RTDB_URL')
-local RTDB_SECRET = os.getenv('RTDB_SECRET')
+-- dotenv.load() (called in main.lua) only stores values in dotenv's own
+-- internal table, it does not export them as real OS env vars. Reading via
+-- os.getenv() here would miss anything set through .env, so use dotenv.get()
+-- instead, which checks its own table first then falls back to os.getenv().
+local RTDB_URL = dotenv.get('RTDB_URL')
+local RTDB_SECRET = dotenv.get('RTDB_SECRET')
 
 if not RTDB_URL then
   error('Missing RTDB_URL in env. e.g. https://<project>-default-rtdb.<region>.firebasedatabase.app')
