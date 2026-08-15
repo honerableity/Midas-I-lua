@@ -2,10 +2,18 @@ local discordia = require('discordia')
 local dslash = require('discordia-slash')
 local fs = require('fs')      
 local pathjoin = require('pathjoin')
+local dotenv = require('dotenv')
 
-local DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
-if not DISCORD_TOKEN then
-  print('Missing DISCORD_TOKEN in env. Copy .env.example to .env and fill it in.')
+local ok, err = dotenv.load()
+if not ok then
+  print('Failed to load .env: ' .. tostring(err))
+  os.exit(1)
+end
+
+local DISCORD_TOKEN = dotenv.get('DISCORD_TOKEN')
+
+if not DISCORD_TOKEN or DISCORD_TOKEN == '' then
+  print('Missing DISCORD_TOKEN in .env')
   os.exit(1)
 end
 
