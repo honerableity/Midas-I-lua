@@ -1,4 +1,4 @@
-local rtdb = require('rtdb')
+local rtdb = require('utils.rtdb')
 local discordia = require('discordia')
 
 local M = {}
