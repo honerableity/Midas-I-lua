@@ -1,5 +1,11 @@
 local fs = require('fs')
 local pathjoin = require('pathjoin')
+local dotenv = require('dotenv')
+
+local ok, err = dotenv.load()
+if not ok then
+  error('Failed to load .env: ' .. tostring(err))
+end
 
 local M = {}
 
@@ -7,7 +13,7 @@ function M.run(client)
   local required = { 'DISCORD_TOKEN', 'CLIENT_ID', 'GUILD_ID' }
   local missing = {}
   for _, key in ipairs(required) do
-    if not os.getenv(key) then
+    if not dotenv.get(key) then
       table.insert(missing, key)
     end
   end
@@ -42,8 +48,8 @@ function M.run(client)
 
   local ok, result = pcall(function()
     return client._api:bulkOverwriteGuildApplicationCommands(
-      os.getenv('CLIENT_ID'),
-      os.getenv('GUILD_ID'),
+      dotenv.get('CLIENT_ID'),
+      dotenv.get('GUILD_ID'),
       commands
     )
   end)
