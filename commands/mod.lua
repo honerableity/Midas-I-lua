@@ -1,7 +1,7 @@
 local discordia = require('discordia')
 local tools = require('discordia-slash').util.tools()
-local logger = require('logger')
-local moderation = require('moderation')
+local logger = require('utils.logger')
+local moderation = require('utils.moderation')
 
 local enums = discordia.enums
 
@@ -419,7 +419,7 @@ function M.handleWarn(ia, args)
   local data2 = moderation.addWarn(ia.guildId, targetUser.id, ia.user.id, reason)
   local count = (data2 and data2.count) or 0
 
-  -- DM the user -- best effort, don't fail the command if DMs are closed.
+  -- DM the user -- best effort, don\'t fail the command if DMs are closed.
   pcall(function()
     targetUser:send({
       embed = {
