@@ -169,40 +169,53 @@ function M.deleteExpiringAction(docId)
   pcall(rtdb.delete, 'expiringActions/' .. docId)
 end
 
+local scanInProgress = false
+
 function M.runExpiryScan(client)
-  local ok, due = pcall(M.getDueExpiringActions, os.time() * 1000)
-  if not ok then
-    print('[moderation] runExpiryScan fetch failed: ' .. tostring(due))
+  if scanInProgress then
+    print('[moderation] runExpiryScan skipped: previous scan still in flight')
     return
   end
+  scanInProgress = true
 
-  for _, action in ipairs(due) do
-    local ok2, err2 = pcall(function()
-      local guild = client:getGuild(action.guildId)
-      if not guild then
-        M.deleteExpiringAction(action.id)
-        return
-      end
-
-      if action.type == 'ban' then
-        
-        pcall(function() guild:unbanUser(action.userId, 'Temp-ban duration expired') end)
-      elseif action.type == 'vcmute' then
-        local member = guild:getMember(action.userId)
-      
-        if member and member.voiceChannel then
-          pcall(function() member:unmute() end)
-        end
-      end
-
-      M.deleteExpiringAction(action.id)
-    end)
-
-    if not ok2 then
-      print('[moderation] failed to reverse expiring action ' .. tostring(action.id) .. ': ' .. tostring(err2))
-     
+  coroutine.wrap(function()
+    local ok, due = pcall(M.getDueExpiringActions, os.time() * 1000)
+    if not ok then
+      print('[moderation] runExpiryScan fetch failed: ' .. tostring(due))
+      scanInProgress = false
+      return
     end
-  end
+
+    for _, action in ipairs(due) do
+      local ok2, err2 = pcall(function()
+        local guild = client:getGuild(action.guildId)
+        if not guild then
+          M.deleteExpiringAction(action.id)
+          return
+        end
+
+        if action.type == 'ban' then
+          
+          pcall(function() guild:unbanUser(action.userId, 'Temp-ban duration expired') end)
+        elseif action.type == 'vcmute' then
+          local member = guild:getMember(action.userId)
+        
+          if member and member.voiceChannel then
+            pcall(function() member:unmute() end)
+          end
+        end
+
+        M.deleteExpiringAction(action.id)
+      end)
+
+      if not ok2 then
+        print('[moderation] failed to reverse expiring action ' .. tostring(action.id) .. ': ' .. tostring(err2))
+       
+      end
+    end
+
+    scanInProgress = false
+  end)()
 end
 
 function M.startExpiryScanner(client, intervalMs)
