@@ -18,72 +18,106 @@ data:addOption(
 
 M.data = data
 
+-- In-memory cache: channelId -> record. Skip rtdb read on every message.
+local cache = {}
+-- Per-channel state machine: 'idle' | 'pending' | 'reposting'
+local state = {}
+-- Debounce timers per channel
+local timers = {}
+
+local DEBOUNCE_MS = 1200 -- coalesce burst of messages into one repost
+
 local function stickyPath(channelId)
   return 'sticky/' .. channelId
 end
 
 local function safeDeleteMessage(channel, messageId)
-  if not messageId then return end
-  local ok, err = pcall(function()
+  if not messageId then return true end
+  local ok = pcall(function()
     local msg = channel.messages:get(messageId)
-    if not msg then
-      msg = channel:getMessage(messageId)
+    if msg then
+      msg:delete()
+    else
+      channel:getMessage(messageId):delete()
     end
-    if msg then msg:delete() end
   end)
-  if not ok then
-    print('[sticky] safeDeleteMessage failed for ' .. tostring(messageId) .. ' in ' .. tostring(channel.id) .. ': ' .. tostring(err))
-  end
-  return ok
+  return ok -- false if already gone/no perm; not fatal
 end
 
-local function repostSticky(channel, record)
+-- Core repost logic. Deletes old sticky msg, sends new one, updates cache + rtdb.
+local function doRepost(channel)
+  local channelId = channel.id
+  local record = cache[channelId]
+  if not record then return end
+
+  state[channelId] = 'reposting'
+
+  safeDeleteMessage(channel, record.stickyMessageId)
+
   local sendOk, newMsg = pcall(function()
     return channel:send({
       content = record.content ~= '' and record.content or nil,
       embed = record.embed,
     })
   end)
-  if not sendOk then
-    print('[sticky] send failed in ' .. tostring(channel.id) .. ': ' .. tostring(newMsg))
-    return nil
-  end
-  if not newMsg then
-    print('[sticky] send returned nil message in ' .. tostring(channel.id))
-    return nil
+
+  if not sendOk or not newMsg then
+    print('[sticky] send failed in ' .. channelId .. ': ' .. tostring(newMsg))
+    state[channelId] = 'idle'
+    return
   end
 
   record.stickyMessageId = newMsg.id
-  local setOk, setErr = pcall(rtdb.set, stickyPath(channel.id), record)
+  cache[channelId] = record
+  state[channelId] = 'idle'
+
+  -- Fire-and-forget persist; UI-facing repost already done, don't block on it.
+  local setOk, setErr = pcall(rtdb.set, stickyPath(channelId), record)
   if not setOk then
-    print('[sticky] rtdb.set failed for ' .. tostring(channel.id) .. ': ' .. tostring(setErr))
+    print('[sticky] rtdb.set failed for ' .. channelId .. ': ' .. tostring(setErr))
   end
-  return newMsg
 end
 
--- Called from main.lua's messageCreate handler. Bumps the sticky back to the
--- bottom of the channel whenever a newer message comes in, so it always
--- stays the last message. The new message itself is left alone.
+-- Debounced trigger: many messages in quick succession collapse to one repost.
+local function scheduleRepost(channel)
+  local channelId = channel.id
+
+  if timers[channelId] then
+    timers[channelId]:stop()
+    timers[channelId] = nil
+  end
+
+  timers[channelId] = discordia.timer.setTimeout(DEBOUNCE_MS, function()
+    timers[channelId] = nil
+    if state[channelId] == 'reposting' then return end -- already mid-flight, next activity reschedules
+    doRepost(channel)
+  end)
+end
+
+-- Called from main.lua's messageCreate handler.
 function M.handleActivity(message)
   if message.author and message.author.bot then return end
   if not message.guildId then return end
 
   local channel = message.channel
+  local channelId = channel.id
 
-  local getRecOk, record = pcall(rtdb.get, stickyPath(channel.id))
-  if not getRecOk then
-    print('[sticky] rtdb.get failed in ' .. tostring(channel.id) .. ': ' .. tostring(record))
-    return
+  local record = cache[channelId]
+  if record == nil then
+    -- cold cache: load once, then cache holds authority (avoid rtdb hit every message)
+    local ok, fetched = pcall(rtdb.get, stickyPath(channelId))
+    if not ok then
+      print('[sticky] rtdb.get failed in ' .. channelId .. ': ' .. tostring(fetched))
+      return
+    end
+    record = fetched or false -- false = confirmed "no sticky", skip future lookups
+    cache[channelId] = record
   end
+
   if not record or not record.stickyMessageId then return end
   if message.id == record.stickyMessageId then return end
 
-  safeDeleteMessage(channel, record.stickyMessageId)
-
-  local repostOk, repostErr = pcall(repostSticky, channel, record)
-  if not repostOk then
-    print('[sticky] repostSticky threw in ' .. tostring(channel.id) .. ': ' .. tostring(repostErr))
-  end
+  scheduleRepost(channel)
 end
 
 function M.execute(ia, cmd, args)
@@ -99,6 +133,7 @@ function M.execute(ia, cmd, args)
 
   local subArgs, sub = tools.getSubCommand(cmd)
   local channel = ia.channel
+  local channelId = channel.id
 
   ia:replyDeferred(true)
 
@@ -113,29 +148,56 @@ function M.execute(ia, cmd, args)
 
     local content = srcMessage.content
     local embeds = srcMessage.embeds
+    local newEmbed = embeds and embeds[1] or nil
 
-    -- Delete the original message.
     local delOk = pcall(function() srcMessage:delete() end)
     if not delOk then
       ia:editReply({ content = 'Found the message but could not delete it. Check my Manage Messages permission.' })
       return
     end
 
-    -- Remove any existing sticky in this channel first (one per channel).
-    local existing = rtdb.get(stickyPath(channel.id))
+    -- kill any pending debounce so it doesn't race this manual repost
+    if timers[channelId] then
+      timers[channelId]:stop()
+      timers[channelId] = nil
+    end
+
+    local existing = cache[channelId]
+    if existing == nil then
+      local ok, fetched = pcall(rtdb.get, stickyPath(channelId))
+      existing = ok and fetched or nil
+    end
     if existing and existing.stickyMessageId then
       safeDeleteMessage(channel, existing.stickyMessageId)
     end
 
-    local newMsg = repostSticky(channel, {
-      content = content,
-      embed = embeds and embeds[1] or nil,
-      setBy = ia.user.id,
-      setAt = os.time(),
-    })
-    if not newMsg then
+    state[channelId] = 'reposting'
+    local sendOk, newMsg = pcall(function()
+      return channel:send({
+        content = content ~= '' and content or nil,
+        embed = newEmbed,
+      })
+    end)
+    state[channelId] = 'idle'
+
+    if not sendOk or not newMsg then
+      cache[channelId] = false
       ia:editReply({ content = 'Original deleted, but failed to post the sticky message.' })
       return
+    end
+
+    local record = {
+      content = content,
+      embed = newEmbed,
+      stickyMessageId = newMsg.id,
+      setBy = ia.user.id,
+      setAt = os.time(),
+    }
+    cache[channelId] = record
+
+    local setOk, setErr = pcall(rtdb.set, stickyPath(channelId), record)
+    if not setOk then
+      print('[sticky] rtdb.set failed for ' .. channelId .. ': ' .. tostring(setErr))
     end
 
     ia:editReply({ content = 'Stuck message to this channel.' })
@@ -143,15 +205,31 @@ function M.execute(ia, cmd, args)
   end
 
   if sub == 'unstick' then
-    local existing = rtdb.get(stickyPath(channel.id))
+    local existing = cache[channelId]
+    if existing == nil then
+      local ok, fetched = pcall(rtdb.get, stickyPath(channelId))
+      existing = ok and fetched or nil
+    end
+
     if not existing or not existing.stickyMessageId then
       ia:editReply({ content = 'No sticky message set in this channel.' })
       return
     end
 
+    if timers[channelId] then
+      timers[channelId]:stop()
+      timers[channelId] = nil
+    end
+
     safeDeleteMessage(channel, existing.stickyMessageId)
 
-    rtdb.delete(stickyPath(channel.id))
+    cache[channelId] = false
+    state[channelId] = 'idle'
+
+    local delOk, delErr = pcall(rtdb.delete, stickyPath(channelId))
+    if not delOk then
+      print('[sticky] rtdb.delete failed for ' .. channelId .. ': ' .. tostring(delErr))
+    end
 
     ia:editReply({ content = 'Removed sticky message from this channel.' })
     return
