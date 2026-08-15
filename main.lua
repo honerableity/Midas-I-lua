@@ -57,7 +57,7 @@ end
 local function deployCommands()
   print('Deploying slash commands...')
   local ok, err = pcall(function()
-    local deploy = require(pathjoin.pathJoin(module.dir, 'deploy-commands'))
+    local deploy = require('deploy-command')
     deploy.run(client)
   end)
   if not ok then
