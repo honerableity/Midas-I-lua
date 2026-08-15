@@ -31,17 +31,29 @@ local function stickyPath(channelId)
   return 'sticky/' .. channelId
 end
 
+-- Deletes a message by id, tolerant of it already being gone (404),
+-- lacking perms, or any other API failure. Never throws.
+-- Splits fetch and delete into SEPARATE pcalls: the discordia HTTP client
+-- can still surface a log line on 404 internally, but this keeps that path
+-- isolated to just the fetch, and avoids compounding failure by chaining
+-- fetch:delete() as one call (chaining meant a bad fetch produced a nil
+-- object then to :delete() got called on it, a second failure on top of
+-- the first).
 local function safeDeleteMessage(channel, messageId)
   if not messageId then return true end
-  local ok = pcall(function()
-    local msg = channel.messages:get(messageId)
-    if msg then
-      msg:delete()
-    else
-      channel:getMessage(messageId):delete()
+
+  local msg = channel.messages:get(messageId)
+
+  if not msg then
+    local getOk, fetched = pcall(function() return channel:getMessage(messageId) end)
+    if not getOk or not fetched then
+      return false -- gone / no perm / 404 — not fatal, caller continues
     end
-  end)
-  return ok -- false if already gone/no perm; not fatal
+    msg = fetched
+  end
+
+  local delOk = pcall(function() msg:delete() end)
+  return delOk
 end
 
 -- Core repost logic. Deletes old sticky msg, sends new one, updates cache + rtdb.
