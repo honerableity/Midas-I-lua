@@ -21,13 +21,22 @@ function M.run(client)
     error('Missing env var(s): ' .. table.concat(missing, ', ') .. '. Copy .env.example to .env and fill them in.')
   end
 
-  local commandsDir = pathjoin.pathJoin(module.dir, 'commands')
+  -- module.dir only resolves correctly for the true entrypoint (main.lua);
+  -- this file is loaded via require() from main.lua, so module.dir here
+  -- resolves to Lua's legacy module() function instead (no .dir field).
+  -- Luvit apps always run with CWD at the project root, so build the path
+  -- relative to CWD instead.
+  local commandsDir = pathjoin.pathJoin('.', 'commands')
   local commandFiles = fs.readdirSync(commandsDir)
 
   local commands = {}
   for _, file in ipairs(commandFiles) do
     if file:match('%.lua$') then
-      local cmd = require(pathjoin.pathJoin(commandsDir, file))
+      -- require() needs a dotted module name, not a filesystem path with
+      -- a .lua extension — pathjoin.pathJoin(commandsDir, file) produced
+      -- something like './commands/mod.lua', which require() can't resolve.
+      local modName = 'commands.' .. file:gsub('%.lua$', '')
+      local cmd = require(modName)
       if not (cmd and cmd.data) then
         print('Skipped ' .. file .. ': no "data" export found.')
       else
