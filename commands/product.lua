@@ -4,7 +4,7 @@ local channelType = discordia.enums.channelType
 local buttonStyle = discordia.enums.buttonStyle
 local textInputStyle = discordia.enums.textInputStyle
 
-local uuid = require('uuid')
+local uuid = require('resty.jit-uuid')
 local logger = require('../utils/logger')
 local products = require('../utils/products')
 local verification = require('../utils/verification')
@@ -180,7 +180,7 @@ local function handleCreate(interaction)
 
     pcall(function() typeSelectInteraction:deferUpdate() end)
 
-    local productId = uuid.new()
+    local productId = uuid()
     local productData = {
         productId = productId,
         name = productName,
