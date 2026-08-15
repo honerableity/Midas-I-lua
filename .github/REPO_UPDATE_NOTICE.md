@@ -1,0 +1,1 @@
+This repository was updated automatically by GitHub Copilot per the owner's request: added LICENSE and populated README.md.
