@@ -29,10 +29,20 @@ local function repostSticky(channel, record)
       embed = record.embed,
     })
   end)
-  if not sendOk or not newMsg then return nil end
+  if not sendOk then
+    print('[sticky] send failed in ' .. tostring(channel.id) .. ': ' .. tostring(newMsg))
+    return nil
+  end
+  if not newMsg then
+    print('[sticky] send returned nil message in ' .. tostring(channel.id))
+    return nil
+  end
 
   record.stickyMessageId = newMsg.id
-  rtdb.set(stickyPath(channel.id), record)
+  local setOk, setErr = pcall(rtdb.set, stickyPath(channel.id), record)
+  if not setOk then
+    print('[sticky] rtdb.set failed for ' .. tostring(channel.id) .. ': ' .. tostring(setErr))
+  end
   return newMsg
 end
 
@@ -44,13 +54,23 @@ function M.handleActivity(message)
   if not message.guildId then return end
 
   local channel = message.channel
-  local record = rtdb.get(stickyPath(channel.id))
+
+  local getRecOk, record = pcall(rtdb.get, stickyPath(channel.id))
+  if not getRecOk then
+    print('[sticky] rtdb.get failed in ' .. tostring(channel.id) .. ': ' .. tostring(record))
+    return
+  end
   if not record or not record.stickyMessageId then return end
   if message.id == record.stickyMessageId then return end
 
   local getOk, oldMsg = pcall(function() return channel:getMessage(record.stickyMessageId) end)
   if getOk and oldMsg then
-    pcall(function() oldMsg:delete() end)
+    local delOk, delErr = pcall(function() oldMsg:delete() end)
+    if not delOk then
+      print('[sticky] failed to delete old sticky in ' .. tostring(channel.id) .. ': ' .. tostring(delErr))
+    end
+  elseif not getOk then
+    print('[sticky] getMessage(old sticky) failed in ' .. tostring(channel.id) .. ': ' .. tostring(oldMsg))
   end
 
   repostSticky(channel, record)
