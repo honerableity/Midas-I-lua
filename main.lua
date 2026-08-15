@@ -1,6 +1,6 @@
 local discordia = require('discordia')
 local dslash = require('discordia-slash')
-local fs = require('fs')      
+local fs = require('fs')
 local pathjoin = require('pathjoin')
 local dotenv = require('dotenv')
 
@@ -22,8 +22,10 @@ local client = discordia.Client({
     + discordia.enums.gatewayIntent.guildMembers
     + discordia.enums.gatewayIntent.guildMessages
     + discordia.enums.gatewayIntent.messageContent,
-}):useApplicationCommands()  
-client.commands = {}
+}):useApplicationCommands()
+
+-- Use a local table for commands; do NOT attach to Discordia client object.
+local commands = {}
 
 local commandsDir = pathjoin.pathJoin(module.dir, 'commands')
 local commandFiles = fs.readdirSync(commandsDir)
@@ -33,7 +35,7 @@ for _, file in ipairs(commandFiles) do
     if not (cmd and cmd.data and cmd.data.name) then
       print('Skipped loading ' .. file .. ': missing "data.name" export.')
     else
-      client.commands[cmd.data.name] = cmd
+      commands[cmd.data.name] = cmd
     end
   end
 end
@@ -60,7 +62,7 @@ client:once('ready', function()
 end)
 
 client:on('messageCreate', function(message)
-  local modCommand = client.commands['mod']
+  local modCommand = commands['mod']
   if not (modCommand and modCommand.handleHoneypotMessage) then return end
 
   local ok, err = pcall(modCommand.handleHoneypotMessage, message)
@@ -70,7 +72,7 @@ client:on('messageCreate', function(message)
 end)
 
 client:on('slashCommandAutocomplete', function(ia, cmd, focused_option, args)
-  local command = client.commands[cmd.name]
+  local command = commands[cmd.name]
   if not (command and command.autocomplete) then return end
 
   local ok, err = pcall(command.autocomplete, ia, cmd, focused_option, args)
@@ -92,7 +94,7 @@ local function replyBotError(ia)
 end
 
 client:on('slashCommand', function(ia, cmd, args)
-  local command = client.commands[cmd.name]
+  local command = commands[cmd.name]
   if not command then return end
 
   local ok, err = pcall(command.execute, ia, cmd, args)
@@ -103,9 +105,12 @@ client:on('slashCommand', function(ia, cmd, args)
 end)
 
 local function routeTicketComponent(ia)
-  if not (ia.customId and ia.customId:match('^ticket_')) then return end
+  -- componentInteraction/modalSubmit may expose custom id as ia.customId or ia.data.custom_id;
+  -- check both.
+  local customId = ia.customId or (ia.data and ia.data.custom_id)
+  if not (customId and customId:match('^ticket_')) then return end
 
-  local ticketCommand = client.commands['ticket']
+  local ticketCommand = commands['ticket']
   if not (ticketCommand and ticketCommand.handleComponent) then return end
 
   local ok, err = pcall(ticketCommand.handleComponent, ia)
@@ -115,16 +120,18 @@ local function routeTicketComponent(ia)
   end
 end
 
-if not (ia.data and ia.data.custom_id and ia.data.custom_id:match('^ticket_')) then return end
-
-local ticketCommand = client.commands['ticket']
+-- Removed erroneous top-level ia references that ran at module load time.
 
 local function routeVerifyComponent(ia)
-  if not (ia.data and ia.data.custom_id and ia.data.custom_id:match('^ticket_')) then return end
-  local id = ia.data.custom_id
-  if not (id == 'verify_button' or id == 'verify_modal' or id == 'unverify_modal' or id:match('^profile_')) then return end
+  local id = ia.customId or (ia.data and ia.data.custom_id)
+  if not id then return end
 
-  local verifyCommand = client.commands['verify']
+  -- Allow verification-related component IDs to pass to the verify handler.
+  if not (id == 'verify_button' or id == 'verify_modal' or id == 'unverify_modal' or id:match('^profile_')) then
+    return
+  end
+
+  local verifyCommand = commands['verify']
   if not (verifyCommand and verifyCommand.handleComponent) then return end
 
   local ok, err = pcall(verifyCommand.handleComponent, ia)
