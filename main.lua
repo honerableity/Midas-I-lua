@@ -1,6 +1,6 @@
 local discordia = require('discordia')
 local dslash = require('discordia-slash')
-require('discordia-modal')
+require('discordia-modals')
 local fs = require('fs')
 local pathjoin = require('pathjoin')
 local dotenv = require('dotenv')
