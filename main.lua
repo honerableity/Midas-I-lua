@@ -4,12 +4,6 @@ local fs = require('fs')
 local pathjoin = require('pathjoin')
 local dotenv = require('dotenv')
 
--- Luvit's require() only resolves bare deps/ modules (like 'coro-http') when
--- called directly from the entrypoint file. Files under commands/ and utils/
--- are nested too deep to find deps/ on their own, so we require the modules
--- utils/rtdb.lua needs here (from main.lua, the entrypoint) and prime
--- package.loaded so those same require('coro-http') / require('json') calls
--- inside utils/rtdb.lua resolve from cache instead of failing.
 package.loaded['coro-http'] = require('coro-http')
 package.loaded['json'] = require('json')
 package.loaded['fs'] = fs
@@ -38,7 +32,6 @@ local client = discordia.Client({
     + discordia.enums.gatewayIntent.messageContent,
 }):useApplicationCommands()
 
--- Use a local table for commands; do NOT attach to Discordia client object.
 local commands = {}
 
 local commandsDir = pathjoin.pathJoin(module.dir, 'commands')
@@ -77,11 +70,19 @@ end)
 
 client:on('messageCreate', function(message)
   local modCommand = commands['mod']
-  if not (modCommand and modCommand.handleHoneypotMessage) then return end
+  if modCommand and modCommand.handleHoneypotMessage then
+    local ok, err = pcall(modCommand.handleHoneypotMessage, message)
+    if not ok then
+      print('[mod] honeypot handler failed: ' .. tostring(err))
+    end
+  end
 
-  local ok, err = pcall(modCommand.handleHoneypotMessage, message)
-  if not ok then
-    print('[mod] honeypot handler failed: ' .. tostring(err))
+  local stickyCommand = commands['sticky']
+  if stickyCommand and stickyCommand.handleActivity then
+    local ok, err = pcall(stickyCommand.handleActivity, message)
+    if not ok then
+      print('[sticky] activity handler failed: ' .. tostring(err))
+    end
   end
 end)
 
@@ -119,8 +120,6 @@ client:on('slashCommand', function(ia, cmd, args)
 end)
 
 local function routeTicketComponent(ia)
-  -- componentInteraction/modalSubmit may expose custom id as ia.customId or ia.data.custom_id;
-  -- check both.
   local customId = ia.customId or (ia.data and ia.data.custom_id)
   if not (customId and customId:match('^ticket_')) then return end
 
@@ -134,13 +133,9 @@ local function routeTicketComponent(ia)
   end
 end
 
--- Removed erroneous top-level ia references that ran at module load time.
-
 local function routeVerifyComponent(ia)
   local id = ia.customId or (ia.data and ia.data.custom_id)
   if not id then return end
-
-  -- Allow verification-related component IDs to pass to the verify handler.
   if not (id == 'verify_button' or id == 'verify_modal' or id == 'unverify_modal' or id:match('^profile_')) then
     return
   end
