@@ -17,7 +17,12 @@ end
 
 RTDB_URL = RTDB_URL:gsub('/+$', '')
 
-local FALLBACK_DIR = pathjoin.pathJoin(module.dir, '..', 'main', 'data')
+-- `module.dir` is only populated by Luvit for the true entrypoint script,
+-- not for files loaded via require() (this file included) — it resolves to
+-- Lua's built-in module() function instead in that case, which has no .dir
+-- field. Luvit apps are always run with CWD at the project root, so we build
+-- the fallback path relative to CWD instead.
+local FALLBACK_DIR = pathjoin.pathJoin('.', 'data', 'rtdb-fallback')
 local offline = false
 
 local function buildUrl(path, extraQuery)

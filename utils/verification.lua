@@ -1,7 +1,7 @@
-local rtdb = require('rtdb')
+local rtdb = require('utils.rtdb')
 local http = require('coro-http')
 local json = require('json')
-local words = require('words')
+local words = require('data.words')
 
 local hasOpenssl, openssl = pcall(require, 'openssl')
 if not hasOpenssl then
