@@ -52,7 +52,7 @@ local function deployCommands()
   print('Deploying slash commands...')
   local ok, err = pcall(function()
     local deploy = require('deploy-command')
-    deploy.run(client)
+    deploy.run(client, commands)
   end)
   if not ok then
     print('Auto-deploy failed: ' .. tostring(err))

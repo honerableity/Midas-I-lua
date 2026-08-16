@@ -1,7 +1,9 @@
 local discordia = require('discordia')
 local timer = require('timer')
 local tools = require('discordia-slash').util.tools()
-local rtdb = require('utils.rtdb')
+local pathjoin = require('pathjoin')
+local uv = require('uv')
+local rtdb = require(pathjoin.pathJoin(uv.cwd(), 'utils', 'rtdb.lua'))
 
 local enums = discordia.enums
 local M = {}
